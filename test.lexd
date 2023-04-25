@@ -1,13 +1,15 @@
 PATTERNS
-X Y
+Stem Affix
 
-LEXICON X
-a:z
-b:y
-c:x
+LEXICON Stem
+dada
+nana
+nanayaya
+nada
+dadanana
+danada
+yaya
 
-LEXICON Y
-1
-2
-3
-
+LEXICON Affix
+ya:<n><sg>
+da:<n><pl>

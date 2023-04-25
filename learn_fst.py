@@ -4,6 +4,7 @@ import numpy as np
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import pickle
+import random
 
 def one_hot(n, dim):
     ret = np.zeros(dim)
@@ -31,18 +32,18 @@ class Model:
         self.decode_bias = None
         self.epoch_losses = []
     def make_weights(self):
-        self.embed_weights = np.random.rand(len(self.in_alpha), self.embed_dim)
+        self.embed_weights = np.random.rand(len(self.in_alpha) + self.hidden_dim, self.embed_dim)
         self.embed_bias = np.random.rand(self.embed_dim)
-        self.main_weights = np.random.rand(self.hidden_dim+self.embed_dim, self.hidden_dim*2)
+        self.main_weights = np.random.rand(self.embed_dim, self.hidden_dim*2)
         self.main_bias = np.random.rand(self.hidden_dim*2)
         self.decode_weights = np.random.rand(self.hidden_dim, len(self.out_alpha))
         self.decode_bias = np.random.rand(len(self.out_alpha))
     def predict_single(self, n, hidden):
         '''does not run softmax - returns the raw scores'''
-        emb1 = one_hot(n, len(self.in_alpha)) @ self.embed_weights
+        conc = np.concatenate((hidden, one_hot(n, len(self.in_alpha))))
+        emb1 = conc @ self.embed_weights
         emb2 = np.tanh(emb1 + self.embed_bias)
-        main1 = np.concatenate((hidden, emb2))
-        main2 = main1 @ self.main_weights
+        main2 = emb2 @ self.main_weights
         main3 = np.tanh(main2 + self.main_bias)
         out_hidden = main3[:self.hidden_dim]
         dec1 = main3[self.hidden_dim:] @ self.decode_weights
@@ -58,7 +59,7 @@ class Model:
             out, hidden = self.predict_single(c, hidden)
             # TODO: constrain this to not produce @END@ until we
             # reach the end of the input
-            ret.append(self.out_alpha[np.argmax(out)])
+            ret.append((self.out_alpha[np.argmax(out)], hidden))
         # we could handle some input epsilons by at this point
         # continuing until the output is @END@
         return ret
@@ -66,11 +67,11 @@ class Model:
         x = one_hot(self.in_alpha.index(x_sym), len(self.in_alpha))
         y = one_hot(self.out_alpha.index(y_sym), len(self.out_alpha))
 
-        emb1 = x @ self.embed_weights
-        emb2 = emb1 + self.embed_bias
-        emb3 = np.tanh(emb2)
-        main1 = np.concatenate((x_state, emb3))
-        main2 = main1 @ self.main_weights
+        emb1 = np.concatenate((x_state, x))
+        emb2 = emb1 @ self.embed_weights
+        emb3 = emb2 + self.embed_bias
+        emb4 = np.tanh(emb3)
+        main2 = emb4 @ self.main_weights
         main3 = main2 + self.main_bias
         main4 = np.tanh(main3)
         out_state = main4[:self.hidden_dim]
@@ -79,14 +80,15 @@ class Model:
         dec3 = dec2 + self.decode_bias
         dec4 = softmax(dec3)
 
-        self.losses.append(-np.sum(np.multiply(y, np.log(dec4))))
+        self.losses.append(-np.sum(np.multiply(y, np.log(dec4))) + np.sum(np.power(out_state - y_state, 2)))
 
         rev = dec4 - y
         self.dbg.append(rev * self.decode_bias)
         rev = self.decode_weights * rev
         self.dwg.append(rev)
         rev = np.sum(rev, axis=1)
-        state_diff = out_state - y_state
+        #state_diff = out_state - y_state
+        state_diff = -2 * np.multiply(y_state - out_state, out_state)
         if y_sym == '@END@':
             state_diff = np.zeros(state_diff.shape)
         rev = np.concatenate((state_diff, rev))
@@ -95,11 +97,19 @@ class Model:
         rev = self.main_weights * rev
         self.mwg.append(rev)
         rev = np.sum(rev, axis=1)
-        rev = rev[self.hidden_dim:]
-        rev *= dtanh(emb2)
+        #rev = rev[self.hidden_dim:]
+        #rev *= dtanh(emb2)
+        rev *= dtanh(emb3)
         self.ebg.append(rev * self.embed_bias)
         rev = self.embed_weights * rev
         self.ewg.append(rev)
+    def sample_states(self, X, Y, n=30):
+        for i in range(len(X)):
+            ls = [j for j in range(len(X)) if all(a == b for a,b in zip(X[i][1], Y[j][1]))]
+            random.shuffle(ls)
+            for idx in ls[:n]:
+                _, hidden = self.predict_single(self.in_alpha.index(X[idx][0]), X[idx][1])
+                self.backprop_single(X[i][0], hidden, *Y[i])
     def epoch(self, X, Y, alpha=0.01):
         self.losses = []
         self.ewg = []
@@ -110,14 +120,16 @@ class Model:
         self.dbg = []
         for x, y in zip(X, Y):
             self.backprop_single(*x, *y)
+        self.sample_states(X, Y)
         self.epoch_losses.append(sum(self.losses) / len(self.losses))
         print('  Loss:', self.epoch_losses[-1])
-        self.embed_weights -= alpha * sum(self.ewg)
-        self.embed_bias -= alpha * sum(self.ebg)
-        self.main_weights -= alpha * sum(self.mwg)
-        self.main_bias -= alpha * sum(self.mbg)
-        self.decode_weights -= alpha * sum(self.dwg)
-        self.decode_bias -= alpha * sum(self.dbg)
+        coef = alpha / len(X)
+        self.embed_weights -= coef * sum(self.ewg)
+        self.embed_bias -= coef * sum(self.ebg)
+        self.main_weights -= coef * sum(self.mwg)
+        self.main_bias -= coef * sum(self.mbg)
+        self.decode_weights -= coef * sum(self.dwg)
+        self.decode_bias -= coef * sum(self.dbg)
     def save(self, fname):
         with open(fname, 'wb') as fout:
             pickle.dump([
@@ -178,8 +190,8 @@ class ATT:
         m = Model()
         m.in_alpha = sorted(self.in_symbols)
         m.out_alpha = sorted(self.out_symbols)
-        #m.hidden_dim = int(np.ceil(np.log2(len(self.states))))
-        m.hidden_dim = len(self.states)
+        m.hidden_dim = int(np.ceil(np.log2(len(self.states))))
+        #m.hidden_dim = len(self.states)
         X = []
         Y = []
         # TODO: we can at minimum be clever and merge states that
@@ -193,10 +205,10 @@ class ATT:
                     ret[i] = 1
             return ret
         for src, dest, sin, sout in self.transitions:
-            #X.append((sin, hide(src)))
-            #Y.append((sout, hide(dest)))
-            X.append((sin, one_hot(src, m.hidden_dim)))
-            Y.append((sout, one_hot(dest, m.hidden_dim)))
+            X.append((sin, hide(src)))
+            Y.append((sout, hide(dest)))
+            #X.append((sin, one_hot(src, m.hidden_dim)))
+            #Y.append((sout, one_hot(dest, m.hidden_dim)))
         return m, X, Y
 
 if __name__ == '__main__':
@@ -222,9 +234,9 @@ if __name__ == '__main__':
         for i in range(args.epochs):
             print(f'starting epoch {i+1}')
             model.epoch(train_X, train_Y, args.alpha)
-            if i > 1 and model.epoch_losses[-1] > model.epoch_losses[-2]:
-                print('  early stopping')
-                break
+            #if i > 1 and model.epoch_losses[-1] > model.epoch_losses[-2]:
+            #    print('  early stopping')
+            #    break
         if args.graph:
             plt.plot(list(range(len(model.epoch_losses))), model.epoch_losses)
             plt.show()
