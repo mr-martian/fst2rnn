@@ -214,13 +214,20 @@ class ATT:
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser('convert an FST into an RNN')
-    parser.add_argument('--model', action='store')
-    parser.add_argument('--att', action='store')
-    parser.add_argument('--input', action='store')
-    parser.add_argument('--seed', type=int, default=2319)
-    parser.add_argument('--epochs', type=int, default=5)
-    parser.add_argument('--alpha', type=float, default=0.01)
-    parser.add_argument('--graph', action='store_true')
+    parser.add_argument('--model', action='store',
+                        help='path to save model to (if training) or read from (if predicting)')
+    parser.add_argument('--att', action='store',
+                        help='file to read FST from in AT&T format')
+    parser.add_argument('--input', action='store',
+                        help='space-separated list of symbols to predict')
+    parser.add_argument('--seed', type=int, default=2319,
+                        help='random seed')
+    parser.add_argument('--epochs', type=int, default=5,
+                        help='number of epochs to train for')
+    parser.add_argument('--alpha', type=float, default=0.01,
+                        help='learning rate')
+    parser.add_argument('--graph', action='store_true',
+                        help='display graph of loss curve when training is complete')
     args = parser.parse_args()
 
     np.random.seed(args.seed)
