@@ -10,6 +10,7 @@ The code has been tested the following package versions:
 - Python 3.8.10
 - numpy 1.22.0
 - matplotlib 3.1.2
+
 Python must be at least 3.6, but otherwise most versions of the libraries are probably fine.
 
 ## Architecture
